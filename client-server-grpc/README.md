@@ -10,7 +10,7 @@ Processes and message flow : Client -> Service 1 -> Service 2
 
 Open 3 terminals. Start Service1, Service2 and then client process to send pump message
 ```
-$ pythpn service1.py
-$ pythpn service2.py
-$ pythpn client.py
+$ python service1.py
+$ python service2.py
+$ python client.py
 ```
