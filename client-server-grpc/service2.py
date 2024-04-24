@@ -10,18 +10,18 @@ class Service2(tracing_lib.HelloHandler):
     def __init__(self, service_name, tracer=None, logger=None, stats=None):
         super().__init__(service_name, tracer, logger, stats)
 
-    def handle_message(self, request_from):
+    def handle_message(self, request_from, tenant, msg_id):
         span = trace.get_current_span()
         try:
             raise ValueError('Invalid input')
         except ValueError as e:
             span.record_exception(e)
-        response = helloworld_pb2.HelloReply(message=f"Hello [{request_from}]")
         time.sleep(.3)
         linked_span_context = self.gen_linked_span_context()
         with self.tracer.start_as_current_span("child_linked_span",links=[trace.Link(context=linked_span_context)]) as linked_span:
-            self.log_msg(linked_span, "Started span service_1")
+            self.log_msg(linked_span, f"Started span service_1 {tenant} {msg_id}")
             time.sleep(.3)
+        response = helloworld_pb2.HelloReply(message=f"Hello [{request_from}] - response {self.service_name}")
         return response
 
     def gen_linked_span_context(self):

@@ -9,16 +9,17 @@ class Service1(tracing_lib.HelloHandler):
     def __init__(self, service_name, tracer=None, logger=None, stats=None):
         super().__init__(service_name, tracer, logger, stats)
 
-    def handle_message(self, request_from):
+    def handle_message(self, request_from, tenant, msg_id):
         print("handle_message")
         with grpc.insecure_channel("localhost:50052") as channel:
             span = trace.get_current_span()
-            self.log_msg(span, "server_1 - sending to server_2")
+            self.log_msg(span, f"server_1 - sending to server_2 - {tenant} {msg_id}")
             stub = helloworld_pb2_grpc.GreeterStub(channel)
-            response = stub.SayHello(helloworld_pb2.HelloRequest(name=request_from), timeout=30)
-            self.log_msg(span, f"server_1 - got response from server2 {response}")
+            data = {"src":request_from, "tenant":tenant, "msg_id": msg_id}
+            response = stub.SayHello(helloworld_pb2.HelloRequest(name=str(data)), timeout=30)
+            #self.log_msg(span, f"server_1 - got response from server2 {response}")
             value = getattr(response, "message")
-            value = f"{value} - resp server_1"
+            value = f"{value} - response {self.service_name}"
             # linked_span_context = self.gen_linked_span_context()
             # with self.tracer.start_as_current_span("span_with_link", links=[trace.Link(context=linked_span_context)]) as another_span:
             #     self.log_msg(another_span, "Started span with links")

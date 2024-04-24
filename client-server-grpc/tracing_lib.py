@@ -1,5 +1,6 @@
 import datetime
 import logging
+import random
 import time
 
 from opentelemetry import _logs
@@ -46,10 +47,10 @@ def configure_metrics(server=OTEL_COLLECTOR, service_name="metrics_test"):
 
 
 # setup app tracing to send traces to otel collector
-def configure_tracing(server=OTEL_COLLECTOR, service_name="trace_test", tenant="test_tenant"):
+def configure_tracing(server=OTEL_COLLECTOR, service_name="trace_test"):
     endpoint = f"http://{server}:4318/v1/traces"
     trace_processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, timeout=100))
-    tracer_provider = TracerProvider(resource=Resource(attributes={SERVICE_NAME: service_name, "tenant_id": tenant}), sampler=ALWAYS_ON)
+    tracer_provider = TracerProvider(resource=Resource(attributes={SERVICE_NAME: service_name}), sampler=ALWAYS_ON)
     trace.set_tracer_provider(tracer_provider)
     tracer_provider.add_span_processor(trace_processor)
     _tracer = trace.get_tracer("harmeet-trace-test")
@@ -97,11 +98,11 @@ class DynamicLogLevelHandler(LoggingHandler):
 
 # log messages, with delays and console output
 def log_msg(_logger, msg):
-    time.sleep(1)
+    #time.sleep(.1)
     print(f"{datetime.datetime.now()} {msg}")
     _logger.error(msg)
     _logger.debug(f"debug {msg}")
-    time.sleep(1)
+    time.sleep(.1)
 
 
 def gen_test_data(_tracer, _logger):
@@ -199,21 +200,25 @@ class HelloHandler(helloworld_pb2_grpc.GreeterServicer):
 
     def SayHello(self, request, context):
         span = trace.get_current_span()
-        self.log_msg(span, "got request")
+        #self.log_msg(span, "got request")
         print(f"span > {span_info(span.get_span_context())}")
         # gen_linked_span_context(_tracer, _logger)
-        request_from = getattr(request, "name")
-        self.log_msg(span, f"request from {request_from}")
-        request_from = f"{request_from} -> {self.service_name}"
+        data = eval(getattr(request, "name"))
+        request_from = f"{data['src']} -> {self.service_name}"
+        tenant = data['tenant']
+        msg_id = data['msg_id']
+        span.set_attribute("tenant_id", tenant)
+        span.set_attribute("msg_id", msg_id)
+        self.log_msg(span, f"request from : {request_from}, {tenant}, {msg_id}")
         start = time.time()
-        time.sleep(.25)
-        response = self.handle_message(request_from)
-        self.stats.add(int(round(time.time() - start, 3) * 1000))
-        self.log_msg(span, "got response")
+        time.sleep(.1*random.randrange(5, 15))
+        response = self.handle_message(request_from, tenant, msg_id)
+        self.stats.add(int(round(time.time() - start, 3) * 1000), tenant=tenant, msg_id=msg_id)
+        self.log_msg(span, f"got response {request_from}, {tenant}, {msg_id}")
         return response
 
-    def handle_message(self, request_from):
-        response = helloworld_pb2.HelloReply(message=f"Hello [{request_from}]")
+    def handle_message(self, request_from, tenant, msg_id):
+        response = helloworld_pb2.HelloReply(message=f"Hello [{request_from}] tenant={tenant}, msg_id={msg_id}")
         return response
 
     def log_msg(self, span, msg):
