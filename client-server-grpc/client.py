@@ -21,21 +21,28 @@ import grpc
 import helloworld_pb2
 import helloworld_pb2_grpc
 from opentelemetry.instrumentation import grpc as grpc_instrumentation
-from opentelemetry import trace
 
 import tracing_lib
+import time
 
 
-def run():
+
+def run(stats, tenant, msg_id):
     print("Will try to greet world ...")
+    start = time.time()
     with grpc.insecure_channel("localhost:50051") as channel:
         stub = helloworld_pb2_grpc.GreeterStub(channel)
+        #response = stub.SayHello(helloworld_pb2.HelloRequest(name=f"hello?tenant={tenant}&msg_id={msg_id}"))
         response = stub.SayHello(helloworld_pb2.HelloRequest(name="client"))
+        time.sleep(0.1)
+    stats.add(process_time=int(round(time.time() - start,3)*1000), tenant=tenant, msg_id=msg_id)
     print("Greeter client received: " + response.message)
 
 if __name__ == "__main__":
-    logging.basicConfig()
-    vm_endpoint = "http://34.72.18.251:4318"
-    tracer = tracing_lib.configure_tracing(vm_endpoint, service_name="client")
-    grpc_instrumentation.GrpcInstrumentorClient().instrument()
-    run()
+    service_name = "otel_test_client"
+    tracer, logger, metrics, stats = tracing_lib.grpc_otel_config(service_name=service_name)
+    for msg_idx in range(1):
+        for tenant in ["tenant1"]:
+            run(stats, tenant, str(msg_idx))
+            time.sleep(.1)
+        time.sleep(.3)

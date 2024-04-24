@@ -1,57 +1,56 @@
-# Copyright 2015 gRPC authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""The Python implementation of the GRPC helloworld.Greeter server."""
-
-from concurrent import futures
-import logging
+import threading
 import time
 
-import grpc
 import helloworld_pb2
-import helloworld_pb2_grpc
 import tracing_lib
-from opentelemetry.instrumentation import grpc as grpc_instrumentation
 from opentelemetry import trace
 
-class Greeter(helloworld_pb2_grpc.GreeterServicer):
-  def SayHello(self, request, context):
-    span = trace.get_current_span()
-    log_msg(span,"server_2 - hello request")
-    print(f"span > {span}")
-    #time.sleep(10)
-    return helloworld_pb2.HelloReply(message="Hello [%s]. resp server2" % request.name)
 
-def log_msg(span, msg):
-  print(msg)
-  logger.error(msg)
-  #time.sleep(.1)
-  span.add_event(msg)
+class Service2(tracing_lib.HelloHandler):
+    def __init__(self, service_name, tracer=None, logger=None, stats=None):
+        super().__init__(service_name, tracer, logger, stats)
 
-def serve():
-  port = "50052"
-  grpc_instrumentation.GrpcInstrumentorServer().instrument()
-  server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-  helloworld_pb2_grpc.add_GreeterServicer_to_server(Greeter(), server)
-  server.add_insecure_port("[::]:" + port)
-  server.start()
-  print("Server started, listening on " + port)
-  server.wait_for_termination()
+    def handle_message(self, request_from):
+        span = trace.get_current_span()
+        try:
+            raise ValueError('Invalid input')
+        except ValueError as e:
+            span.record_exception(e)
+        response = helloworld_pb2.HelloReply(message=f"Hello [{request_from}]")
+        time.sleep(.3)
+        linked_span_context = self.gen_linked_span_context()
+        with self.tracer.start_as_current_span("child_linked_span",links=[trace.Link(context=linked_span_context)]) as linked_span:
+            self.log_msg(linked_span, "Started span service_1")
+            time.sleep(.3)
+        return response
 
+    def gen_linked_span_context(self):
+        with self.tracer.start_as_current_span("linked-span",context=trace.Context()) as linked_span:
+            self.log_msg(linked_span, "Starting span linked-service")
+            linked_span.set_attribute("attr1", "linked-attr1")
+            linked_span.set_attribute("attr2", "linked-attr2")
+            linked_span.add_event("event-1")
+            print(f"linked_span > {tracing_lib.span_info(linked_span.get_span_context())}")
+            with self.tracer.start_as_current_span("child-span") as child_span:
+                self.log_msg(child_span, "Starting child-span")
+                child_span.set_attribute("attr1", "child-attr1")
+                child_span.set_attribute("attr2", "child-attr2")
+                child_span.add_event("event-2")
+                print(f"child_span > {tracing_lib.span_info(child_span.get_span_context())}")
+                threading.Thread(target=self.linked_child_span, args=(child_span,)).start()
+            return linked_span.get_span_context()
+
+    def linked_child_span(self, parent_span):
+        parent_span_context = trace.set_span_in_context(parent_span)
+        with self.tracer.start_as_current_span("child-sub-span", context=parent_span_context) as span:
+            span.set_attribute("attr1", "child-sub-attr1")
+            span.set_attribute("attr2", "child-sub-attr2")
+            span.add_event("event-3")
+            time.sleep(2)
+            print(f"linked_span_done > {tracing_lib.span_info(span.get_span_context())}")
 
 if __name__ == "__main__":
-  logging.basicConfig()
-  vm_endpoint = "http://34.72.18.251:4318"
-  tracer = tracing_lib.configure_tracing(vm_endpoint, service_name="service_2")
-  logger = tracing_lib.configure_logging(vm_endpoint)
-  serve()
+    service_name = "otel_test_service_2"
+    tracer, logger, metrics, stats = tracing_lib.grpc_otel_config(service_name=service_name)
+    handler = Service2(service_name="service2", tracer=tracer, logger=logger, stats=stats)
+    tracing_lib.start_grpc_server(50052, handler)
